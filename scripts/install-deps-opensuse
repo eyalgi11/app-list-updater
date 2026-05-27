@@ -50,7 +50,6 @@ required_packages=(
   git
   make
   python3
-  rpm
   sudo
   systemd
   tar

@@ -7,7 +7,7 @@ REPO_URL="${APP_LIST_TEST_REPO_URL:-https://github.com/eyalgi11/app-list-updater
 docker run --rm "$IMAGE" bash -lc "
   set -euo pipefail
   zypper --non-interactive refresh
-  zypper --non-interactive install --no-confirm --download as-needed git make bash bzip2 coreutils curl file findutils gawk python3 rpm sudo systemd tar util-linux zypper
+  zypper --non-interactive install --no-confirm --download as-needed git make bash bzip2 coreutils curl file findutils gawk python3 sudo systemd tar util-linux zypper
   useradd -m tester
   su - tester -c 'git clone $REPO_URL ~/app-list-updater'
   su - tester -c 'cd ~/app-list-updater && make test'

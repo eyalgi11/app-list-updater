@@ -92,16 +92,22 @@ Warning: Codex CLI was not found. The timer can be installed, but AI inventory r
 EOF
 fi
 
+installed_user_units=0
+
 if (( INSTALL_TIMER )); then
   render_unit "$PROJECT_DIR/systemd/app-list-updater.service" "$USER_SYSTEMD_DIR/app-list-updater.service"
   copy_unit "$PROJECT_DIR/systemd/app-list-updater.timer" "$USER_SYSTEMD_DIR/app-list-updater.timer"
+  installed_user_units=1
 fi
 
 if (( INSTALL_DASHBOARD )); then
   render_unit "$PROJECT_DIR/systemd/app-list-dashboard.service" "$USER_SYSTEMD_DIR/app-list-dashboard.service"
+  installed_user_units=1
 fi
 
-systemctl --user daemon-reload
+if (( installed_user_units )); then
+  systemctl --user daemon-reload
+fi
 
 if (( INSTALL_TIMER )); then
   systemctl --user enable --now app-list-updater.timer

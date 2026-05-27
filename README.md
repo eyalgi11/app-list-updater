@@ -53,7 +53,7 @@ Core dependencies:
 - `curl`, `tar`, `bzip2`, `file`
 - `python3`
 - `systemd`
-- `rpm`, `zypper`, `sudo`
+- `rpm` command, `zypper`, `sudo`
 - `flatpak`
 - optional: `kdialog` for KDE desktop notifications
 - Codex CLI available as `codex` on `PATH`, or set `CODEX_BIN=/path/to/codex`
