@@ -1,6 +1,6 @@
 PREFIX ?= /usr/local
 
-.PHONY: install deps uninstall status dashboard test
+.PHONY: install deps uninstall status dashboard test test-docker
 
 install:
 	./scripts/install
@@ -22,3 +22,6 @@ test:
 	find bin scripts -type f -exec bash -n {} \;
 	./bin/generate-dashboard >/dev/null
 	./bin/weekly-maintenance --dry-run >/dev/null
+
+test-docker:
+	./scripts/test-portable-docker

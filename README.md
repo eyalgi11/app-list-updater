@@ -244,6 +244,14 @@ Run local checks:
 make test
 ```
 
+Run an openSUSE container portability test:
+
+```bash
+scripts/test-portable-docker
+```
+
+This clones the public GitHub repo inside a fresh openSUSE container, installs required packages, runs `make test`, and verifies first-run local state creation.
+
 Initialize a repository:
 
 ```bash
