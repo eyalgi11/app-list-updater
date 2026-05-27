@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# shellcheck source=bin/lib/common
+source "$SCRIPT_DIR/lib/common"
+
+PROJECT_DIR="$(resolve_project_dir)"
+LOG_DIR="$PROJECT_DIR/logs"
+LOCK_FILE="$PROJECT_DIR/.update.lock"
+PROMPT_FILE="$PROJECT_DIR/prompts/update-app-list.md"
+APP_LIST_FILE="$PROJECT_DIR/apps.md"
+DISCOVERY_BIN="$PROJECT_DIR/bin/collect-installed-apps"
+CODEX_BIN="$(find_codex_bin)"
+
+mkdir -p "$LOG_DIR"
+
+timestamp="$(date +%Y%m%d-%H%M%S)"
+log_file="$LOG_DIR/update-$timestamp.log"
+last_message_file="$LOG_DIR/update-$timestamp.final.md"
+run_prompt_file="$LOG_DIR/update-$timestamp.prompt.md"
+
+usage() {
+  printf 'Usage: %s [--dry-run]\n' "$0"
+}
+
+dry_run=0
+case "${1:-}" in
+  "")
+    ;;
+  --dry-run)
+    dry_run=1
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [[ ! -x "$CODEX_BIN" ]]; then
+  printf 'Codex binary not found or not executable: %s\n' "$CODEX_BIN" >&2
+  exit 1
+fi
+
+if [[ ! -f "$PROMPT_FILE" || ! -f "$APP_LIST_FILE" || ! -x "$DISCOVERY_BIN" ]]; then
+  printf 'Missing %s, %s, or executable %s\n' "$PROMPT_FILE" "$APP_LIST_FILE" "$DISCOVERY_BIN" >&2
+  exit 1
+fi
+
+cmd=(
+  "$CODEX_BIN"
+  --search
+  --ask-for-approval never
+  exec
+  --skip-git-repo-check
+  --sandbox workspace-write
+  --cd "$PROJECT_DIR"
+  --output-last-message "$last_message_file"
+  -
+)
+
+if (( dry_run )); then
+  printf 'Project: %s\n' "$PROJECT_DIR"
+  printf 'Prompt: %s\n' "$PROMPT_FILE"
+  printf 'Discovery: %s\n' "$DISCOVERY_BIN"
+  printf 'Log: %s\n' "$log_file"
+  printf 'Command:'
+  printf ' %q' "${cmd[@]}"
+  printf '\n'
+  exit 0
+fi
+
+{
+  printf 'Started: %s\n' "$(date --iso-8601=seconds)"
+  printf 'Project: %s\n' "$PROJECT_DIR"
+  printf 'Command:'
+  printf ' %q' "${cmd[@]}"
+  printf '\n\n'
+
+  flock -n 9 || {
+    printf 'Another app-list update is already running.\n' >&2
+    exit 75
+  }
+
+  {
+    cat "$PROMPT_FILE"
+    printf '\n'
+    "$DISCOVERY_BIN"
+  } > "$run_prompt_file"
+
+  "${cmd[@]}" < "$run_prompt_file"
+
+  printf '\nFinished: %s\n' "$(date --iso-8601=seconds)"
+} 9>"$LOCK_FILE" 2>&1 | tee "$log_file"

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run tracked system package upgrades weekly
+
+[Timer]
+OnCalendar=Mon 10:00
+Persistent=true
+RandomizedDelaySec=30min
+Unit=app-list-system-upgrade.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Apply openSUSE system package updates for tracked apps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@PROJECT_DIR@
+Environment=APP_LIST_UPDATER_DIR=@PROJECT_DIR@
+Environment=APP_LIST_USER_HOME=@USER_HOME@
+Environment=AUTO_UPGRADE_USER_LOCAL=0
+Environment=AUTO_UPGRADE_FLATPAK=0
+Environment=AUTO_UPGRADE_SYSTEM=1
+ExecStart=@PROJECT_DIR@/bin/upgrade-apps

@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# shellcheck source=bin/lib/common
+source "$SCRIPT_DIR/lib/common"
+
+PROJECT_DIR="$(resolve_project_dir)"
+APP_LIST_FILE="$PROJECT_DIR/apps.md"
+OUTPUT_FILE="$PROJECT_DIR/status.html"
+INDEX_FILE="$PROJECT_DIR/index.html"
+
+if [[ ! -f "$APP_LIST_FILE" ]]; then
+  printf 'Missing %s\n' "$APP_LIST_FILE" >&2
+  exit 1
+fi
+
+awk -F '|' '
+  function trim(s) {
+    gsub(/^[ \t]+|[ \t]+$/, "", s)
+    gsub(/^`|`$/, "", s)
+    return s
+  }
+  function esc(s) {
+    gsub(/&/, "\\&amp;", s)
+    gsub(/</, "\\&lt;", s)
+    gsub(/>/, "\\&gt;", s)
+    return s
+  }
+  function td(s) {
+    return "<td>" esc(trim(s)) "</td>"
+  }
+  BEGIN {
+    print "<!doctype html>"
+    print "<html lang=\"en\"><head><meta charset=\"utf-8\">"
+    print "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+    print "<title>App Maintenance Status</title>"
+    print "<style>"
+    print "body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:24px;background:#f7f7f5;color:#202124}"
+    print "h1{font-size:24px;margin:0 0 4px} .muted{color:#666;font-size:13px;margin-bottom:20px}"
+    print ".stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:16px 0 22px}"
+    print ".stat{background:white;border:1px solid #ddd;border-radius:8px;padding:12px}.stat b{font-size:22px;display:block}"
+    print "table{width:100%;border-collapse:collapse;background:white;border:1px solid #ddd;border-radius:8px;overflow:hidden}"
+    print "th,td{border-bottom:1px solid #e6e6e6;padding:8px;text-align:left;font-size:13px;vertical-align:top}"
+    print "th{background:#efefec;font-weight:650;position:sticky;top:0}.yes{color:#126b36;font-weight:650}.no{color:#9b2c2c;font-weight:650}"
+    print ".pill{display:inline-block;padding:2px 7px;border-radius:999px;background:#eee;font-size:12px}"
+    print "</style></head><body>"
+    print "<h1>App Maintenance Status</h1>"
+    cmd = "date --iso-8601=seconds"
+    cmd | getline now
+    close(cmd)
+    print "<div class=\"muted\">Generated " esc(now) "</div>"
+  }
+  NR == 5 {
+    for (i = 1; i <= NF; i++) col[trim($i)] = i
+    next
+  }
+  NR > 6 && trim($2) != "" {
+    rows[++n] = $0
+    current = trim($(col["Current Version"]))
+    repo = trim($(col["Repo Version"]))
+    upstream = trim($(col["Upstream Version"]))
+    auto = trim($(col["Auto Update"]))
+    total++
+    if (auto == "yes") auto_yes++; else auto_no++
+    if (repo != "" && repo != "n/a" && current != repo) installable++
+    else if ((repo == "n/a" || repo == "") && upstream != "" && current != upstream) installable++
+    if (upstream != "" && upstream != "n/a" && current != upstream && (repo == current || repo == "n/a")) upstream_only++
+  }
+  END {
+    print "<div class=\"stats\">"
+    print "<div class=\"stat\"><span>Tracked apps</span><b>" total "</b></div>"
+    print "<div class=\"stat\"><span>Auto update</span><b>" auto_yes "</b></div>"
+    print "<div class=\"stat\"><span>Manual</span><b>" auto_no "</b></div>"
+    print "<div class=\"stat\"><span>Installable updates</span><b>" installable+0 "</b></div>"
+    print "<div class=\"stat\"><span>Newer upstream only</span><b>" upstream_only+0 "</b></div>"
+    print "</div>"
+    print "<table><thead><tr><th>App</th><th>Type</th><th>Updater</th><th>Auto</th><th>Current</th><th>Repo</th><th>Upstream</th><th>Last Checked</th><th>Notes</th></tr></thead><tbody>"
+    for (r = 1; r <= n; r++) {
+      split(rows[r], f, "|")
+      auto = trim(f[col["Auto Update"]])
+      print "<tr>" \
+        td(f[col["App"]]) \
+        "<td><span class=\"pill\">" esc(trim(f[col["Install Type"]])) "</span></td>" \
+        td(f[col["Update Method"]]) \
+        "<td class=\"" auto "\">" esc(auto) "</td>" \
+        td(f[col["Current Version"]]) \
+        td(f[col["Repo Version"]]) \
+        td(f[col["Upstream Version"]]) \
+        td(f[col["Last Checked"]]) \
+        td(f[col["Notes"]]) \
+        "</tr>"
+    }
+    print "</tbody></table></body></html>"
+  }
+' "$APP_LIST_FILE" > "$OUTPUT_FILE"
+
+cp "$OUTPUT_FILE" "$INDEX_FILE"
+printf '%s\n' "$OUTPUT_FILE"

@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# shellcheck source=bin/lib/common
+source "$SCRIPT_DIR/lib/common"
+
+PROJECT_DIR="$(resolve_project_dir)"
+APP_LIST_FILE="$PROJECT_DIR/apps.md"
+LOG_DIR="$PROJECT_DIR/logs"
+
+section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+trim_table_value() {
+  sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^`//' -e 's/`$//'
+}
+
+latest_file() {
+  local pattern="$1"
+  find "$LOG_DIR" -maxdepth 1 -type f -name "$pattern" -printf '%T@ %p\n' 2>/dev/null |
+    sort -nr |
+    awk 'NR == 1 { $1 = ""; sub(/^ /, ""); print }'
+}
+
+timer_line() {
+  local scope="$1"
+  local unit="$2"
+
+  if [[ "$scope" == "user" ]]; then
+    (systemctl --user list-timers --all "$unit" --no-pager 2>/dev/null || true) |
+      awk -v unit="$unit" '$0 ~ unit { print; found = 1 } END { if (!found) print "not available" }'
+  else
+    (systemctl list-timers --all "$unit" --no-pager 2>/dev/null || true) |
+      awk -v unit="$unit" '$0 ~ unit { print; found = 1 } END { if (!found) print "not available" }'
+  fi
+}
+
+if [[ ! -f "$APP_LIST_FILE" ]]; then
+  printf 'Missing %s\n' "$APP_LIST_FILE" >&2
+  exit 1
+fi
+
+section "Timers"
+printf 'User maintenance:  '
+timer_line user app-list-updater.timer
+printf 'System upgrades:   '
+timer_line system app-list-system-upgrade.timer
+
+section "Dashboard"
+printf 'URL: http://127.0.0.1:8765/\n'
+if systemctl --user is-active --quiet app-list-dashboard.service 2>/dev/null; then
+  printf 'Service: active\n'
+else
+  printf 'Service: inactive or not installed\n'
+fi
+
+section "Inventory"
+awk -F '|' '
+  function trim(s) {
+    gsub(/^[ \t]+|[ \t]+$/, "", s)
+    gsub(/^`|`$/, "", s)
+    return s
+  }
+  NR == 5 {
+    for (i = 1; i <= NF; i++) {
+      col[trim($i)] = i
+    }
+    next
+  }
+  NR > 6 && trim($2) != "" {
+    total++
+    install_type[trim($(col["Install Type"]))]++
+    auto_update[trim($(col["Auto Update"]))]++
+  }
+  END {
+    printf "Tracked apps: %d\n", total
+    printf "Install types:"
+    for (type in install_type) {
+      printf " %s=%d", type, install_type[type]
+    }
+    printf "\nAuto update:"
+    for (value in auto_update) {
+      printf " %s=%d", value, auto_update[value]
+    }
+    printf "\n"
+  }
+' "$APP_LIST_FILE"
+
+section "Installable Updates"
+awk -F '|' '
+  function trim(s) {
+    gsub(/^[ \t]+|[ \t]+$/, "", s)
+    gsub(/^`|`$/, "", s)
+    return s
+  }
+  NR == 5 {
+    for (i = 1; i <= NF; i++) {
+      col[trim($i)] = i
+    }
+    next
+  }
+  NR > 6 {
+    app = trim($2)
+    current = trim($(col["Current Version"]))
+    repo = trim($(col["Repo Version"]))
+    upstream = trim($(col["Upstream Version"]))
+    method = trim($(col["Update Method"]))
+    if (repo != "" && repo != "n/a" && current != repo) {
+      printf "- %s: %s -> %s via %s\n", app, current, repo, method
+      found = 1
+    } else if ((repo == "n/a" || repo == "") && upstream != "" && current != upstream) {
+      printf "- %s: %s -> %s via %s\n", app, current, upstream, method
+      found = 1
+    }
+  }
+  END {
+    if (!found) print "none"
+  }
+' "$APP_LIST_FILE"
+
+section "Newer Upstream Exists"
+awk -F '|' '
+  function trim(s) {
+    gsub(/^[ \t]+|[ \t]+$/, "", s)
+    gsub(/^`|`$/, "", s)
+    return s
+  }
+  NR == 5 {
+    for (i = 1; i <= NF; i++) {
+      col[trim($i)] = i
+    }
+    next
+  }
+  NR > 6 {
+    app = trim($2)
+    current = trim($(col["Current Version"]))
+    repo = trim($(col["Repo Version"]))
+    upstream = trim($(col["Upstream Version"]))
+    if (upstream != "" && upstream != "n/a" && current != upstream && (repo == current || repo == "n/a")) {
+      printf "- %s: current=%s repo=%s upstream=%s\n", app, current, repo, upstream
+      found = 1
+    }
+  }
+  END {
+    if (!found) print "none"
+  }
+' "$APP_LIST_FILE"
+
+section "Unsupported Or Manual"
+awk -F '|' '
+  function trim(s) {
+    gsub(/^[ \t]+|[ \t]+$/, "", s)
+    gsub(/^`|`$/, "", s)
+    return s
+  }
+  NR == 5 {
+    for (i = 1; i <= NF; i++) {
+      col[trim($i)] = i
+    }
+    next
+  }
+  NR > 6 {
+    app = trim($2)
+    auto = trim($(col["Auto Update"]))
+    method = trim($(col["Update Method"]))
+    if (auto != "yes") {
+      printf "- %s: auto=%s method=%s\n", app, auto, method
+      found = 1
+    }
+  }
+  END {
+    if (!found) print "none"
+  }
+' "$APP_LIST_FILE"
+
+section "Latest Logs"
+printf 'Update:  %s\n' "$(latest_file 'update-*.log' | trim_table_value)"
+printf 'Upgrade: %s\n' "$(latest_file 'upgrade-*.log' | trim_table_value)"

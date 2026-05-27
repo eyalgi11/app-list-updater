@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+resolve_project_dir() {
+  if [[ -n "${APP_LIST_UPDATER_DIR:-}" ]]; then
+    printf '%s\n' "$APP_LIST_UPDATER_DIR"
+    return 0
+  fi
+
+  local source_dir
+  source_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[1]}")" >/dev/null 2>&1 && pwd -P)"
+  if [[ "$(basename "$source_dir")" == "bin" ]]; then
+    cd -- "$source_dir/.." >/dev/null 2>&1 && pwd -P
+  else
+    cd -- "$source_dir/../.." >/dev/null 2>&1 && pwd -P
+  fi
+}
+
+find_codex_bin() {
+  if [[ -n "${CODEX_BIN:-}" ]]; then
+    printf '%s\n' "$CODEX_BIN"
+    return 0
+  fi
+
+  if command -v codex >/dev/null 2>&1; then
+    command -v codex
+    return 0
+  fi
+
+  printf '%s/.local/bin/codex\n' "$HOME"
+}

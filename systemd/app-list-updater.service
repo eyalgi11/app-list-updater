@@ -1,0 +1,9 @@
+[Unit]
+Description=Update Markdown app list with Codex
+
+[Service]
+Type=oneshot
+WorkingDirectory=@PROJECT_DIR@
+Environment=APP_LIST_UPDATER_DIR=@PROJECT_DIR@
+Environment=APP_LIST_USER_HOME=@USER_HOME@
+ExecStart=@PROJECT_DIR@/bin/weekly-maintenance

@@ -1,0 +1,10 @@
+logs/*.log
+logs/*.final.md
+logs/*.prompt.md
+.update.lock
+.upgrade.lock
+tmp/
+index.html
+status.html
+apps.md
+config.env

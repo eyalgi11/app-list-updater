@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/install-deps-opensuse [--dry-run]
+
+Installs the openSUSE packages used by app-list-updater.
+EOF
+}
+
+dry_run=0
+case "${1:-}" in
+  "")
+    ;;
+  --dry-run)
+    dry_run=1
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [[ -r /etc/os-release ]]; then
+  # shellcheck disable=SC1091
+  source /etc/os-release
+else
+  ID=unknown
+  ID_LIKE=
+fi
+
+if [[ "${ID:-}" != opensuse* && "${ID_LIKE:-}" != *suse* ]]; then
+  printf 'Warning: this installer is tuned for openSUSE. Detected ID=%s ID_LIKE=%s\n' "${ID:-unknown}" "${ID_LIKE:-}" >&2
+fi
+
+required_packages=(
+  bash
+  bzip2
+  coreutils
+  curl
+  file
+  findutils
+  flatpak
+  gawk
+  git
+  make
+  python3
+  rpm
+  sudo
+  systemd
+  tar
+  util-linux
+  zypper
+)
+
+optional_packages=(
+  kdialog
+)
+
+cmd=(sudo zypper --non-interactive install --no-confirm --download as-needed --no-recommends "${required_packages[@]}")
+printf '+'
+printf ' %q' "${cmd[@]}"
+printf '\n'
+if (( ! dry_run )); then
+  "${cmd[@]}"
+fi
+
+for package in "${optional_packages[@]}"; do
+  cmd=(sudo zypper --non-interactive install --no-confirm --download as-needed "$package")
+  printf '+'
+  printf ' %q' "${cmd[@]}"
+  printf '\n'
+  if (( ! dry_run )); then
+    "${cmd[@]}" || printf 'Optional package not installed: %s\n' "$package" >&2
+  fi
+done
+
+if ! command -v codex >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/codex" ]]; then
+  cat >&2 <<'EOF'
+
+Codex CLI was not found. Install it before enabling AI inventory updates.
+Set CODEX_BIN=/path/to/codex if it is installed outside PATH.
+EOF
+fi

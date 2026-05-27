@@ -1,0 +1,17 @@
+[Unit]
+Description=Serve app maintenance dashboard on localhost
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_DIR@
+Environment=APP_LIST_UPDATER_DIR=@PROJECT_DIR@
+Environment=APP_LIST_USER_HOME=@USER_HOME@
+Environment=APP_LIST_DASHBOARD_HOST=127.0.0.1
+Environment=APP_LIST_DASHBOARD_PORT=8765
+ExecStart=@PROJECT_DIR@/bin/serve-dashboard
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

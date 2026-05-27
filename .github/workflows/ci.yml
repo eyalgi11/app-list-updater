@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare local state
+        run: |
+          cp apps.example.md apps.md
+          cp config.example.env config.env
+      - name: Syntax and smoke tests
+        run: make test

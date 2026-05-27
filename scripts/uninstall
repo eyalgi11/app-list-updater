@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REMOVE_SYSTEM_UPGRADES=0
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/uninstall [--system-upgrades]
+
+Disables user services installed by scripts/install.
+Use --system-upgrades to also disable/remove the root system-upgrade timer.
+EOF
+}
+
+case "${1:-}" in
+  "")
+    ;;
+  --system-upgrades)
+    REMOVE_SYSTEM_UPGRADES=1
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+systemctl --user disable --now app-list-updater.timer 2>/dev/null || true
+systemctl --user disable --now app-list-dashboard.service 2>/dev/null || true
+rm -f \
+  "$HOME/.config/systemd/user/app-list-updater.service" \
+  "$HOME/.config/systemd/user/app-list-updater.timer" \
+  "$HOME/.config/systemd/user/app-list-dashboard.service"
+systemctl --user daemon-reload
+
+if (( REMOVE_SYSTEM_UPGRADES )); then
+  sudo systemctl disable --now app-list-system-upgrade.timer 2>/dev/null || true
+  sudo rm -f \
+    /etc/systemd/system/app-list-system-upgrade.service \
+    /etc/systemd/system/app-list-system-upgrade.timer
+  sudo systemctl daemon-reload
+fi
+
+printf 'Uninstalled systemd services. Project files were left in place.\n'

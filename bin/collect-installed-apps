@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+USER_HOME="${APP_LIST_USER_HOME:-$HOME}"
+
+printf '## OS\n\n'
+if [[ -r /etc/os-release ]]; then
+  sed -n '1,20p' /etc/os-release
+else
+  uname -a
+fi
+
+printf '\n## Maintenance Timers\n\n'
+printf '### User maintenance timer\n\n'
+systemctl --user list-timers --all app-list-updater.timer --no-pager 2>/dev/null || true
+printf '\n### System upgrade timer\n\n'
+systemctl list-timers --all app-list-system-upgrade.timer --no-pager 2>/dev/null || true
+printf '\n### System upgrade service\n\n'
+systemctl cat app-list-system-upgrade.service 2>/dev/null || true
+
+printf '\n## Desktop Launchers\n\n'
+for dir in "$USER_HOME/.local/share/applications" /usr/local/share/applications /usr/share/applications; do
+  [[ -d "$dir" ]] || continue
+  printf '### %s\n\n' "$dir"
+  find "$dir" -maxdepth 1 -type f -name '*.desktop' -print 2>/dev/null |
+    sort |
+    while IFS= read -r file; do
+      name="$(awk -F= '/^Name=/{print $2; exit}' "$file" 2>/dev/null || true)"
+      exec_line="$(awk -F= '/^Exec=/{print $2; exit}' "$file" 2>/dev/null || true)"
+      no_display="$(awk -F= '/^NoDisplay=/{print $2; exit}' "$file" 2>/dev/null || true)"
+      hidden="$(awk -F= '/^Hidden=/{print $2; exit}' "$file" 2>/dev/null || true)"
+      categories="$(awk -F= '/^Categories=/{print $2; exit}' "$file" 2>/dev/null || true)"
+      [[ -n "$name" ]] || continue
+      [[ "$no_display" != "true" ]] || continue
+      [[ "$hidden" != "true" ]] || continue
+      printf -- '- file: `%s`\n  name: `%s`\n  exec: `%s`\n  categories: `%s`\n  no_display: `%s`\n  hidden: `%s`\n' \
+        "$file" "$name" "$exec_line" "$categories" "$no_display" "$hidden"
+    done
+done
+
+printf '\n## User Local Opt Installs\n\n'
+for dir in "$USER_HOME/.local/opt" /opt; do
+  [[ -d "$dir" ]] || continue
+  printf '### %s\n\n' "$dir"
+  find "$dir" -mindepth 2 -maxdepth 2 -type f -perm -111 -print 2>/dev/null |
+    sort |
+    while IFS= read -r file; do
+      app_dir="$(basename "$(dirname "$file")")"
+      executable="$(basename "$file")"
+      [[ "$executable" == "$app_dir" || "$executable" == "$app_dir-bin" ]] || continue
+      printf '%s\n' "$file"
+    done
+done
+
+printf '\n## AppImage Candidates\n\n'
+for dir in "$USER_HOME/Applications" "$USER_HOME/Downloads" "$USER_HOME/.local/bin" "$USER_HOME/.local/opt" /opt; do
+  [[ -d "$dir" ]] || continue
+  printf '### %s\n\n' "$dir"
+  find "$dir" -maxdepth 3 -type f \( -iname '*.AppImage' -o -iname '*.appimage' \) -print 2>/dev/null |
+    sort |
+    while IFS= read -r file; do
+      printf -- '- file: `%s`\n' "$file"
+      printf '  executable: `%s`\n' "$([[ -x "$file" ]] && printf yes || printf no)"
+      if command -v file >/dev/null 2>&1; then
+        printf '  type: `%s`\n' "$(file -b "$file" 2>/dev/null || true)"
+      fi
+    done
+done
+
+printf '\n## Manual Executable Candidates\n\n'
+for dir in "$USER_HOME/Applications" "$USER_HOME/.local/bin" "$USER_HOME/.local/opt" /opt; do
+  [[ -d "$dir" ]] || continue
+  printf '### %s\n\n' "$dir"
+  find "$dir" -mindepth 1 -maxdepth 3 \( -type f -o -type l \) -perm -111 \
+    ! -iname '*.so' \
+    ! -iname '*.sig' \
+    ! -iname '*.png' \
+    ! -iname '*.desktop' \
+    -print 2>/dev/null |
+    sort |
+    while IFS= read -r file; do
+      if [[ "$dir" == "$USER_HOME/.local/opt" || "$dir" == /opt ]]; then
+        app_dir="$(basename "$(dirname "$file")")"
+        executable="$(basename "$file")"
+        [[ "$executable" == "$app_dir" || "$executable" == "$app_dir-bin" ]] || continue
+      fi
+      owner="unknown"
+      if command -v rpm >/dev/null 2>&1 && rpm -qf "$file" >/dev/null 2>&1; then
+        owner="$(rpm -qf "$file" 2>/dev/null || true)"
+      fi
+      printf -- '- file: `%s`\n  package_owner: `%s`\n' "$file" "$owner"
+    done
+done
+
+printf '\n## PATH Commands Of Interest\n\n'
+for cmd in waterfox firefox chromium google-chrome brave-browser code codium kate gedit emacs vim nvim flatpak snap zypper appimagetool; do
+  if command -v "$cmd" >/dev/null 2>&1; then
+    printf -- '- `%s`: `%s`\n' "$cmd" "$(command -v "$cmd")"
+  fi
+done
+
+printf '\n## Flatpak Apps\n\n'
+if command -v flatpak >/dev/null 2>&1; then
+  flatpak list --app --columns=application,name,version,origin 2>/dev/null || true
+else
+  printf 'flatpak not found\n'
+fi
+
+printf '\n## Snap Apps\n\n'
+if command -v snap >/dev/null 2>&1; then
+  snap list 2>/dev/null || true
+else
+  printf 'snap not found\n'
+fi
+
+printf '\n## RPM Packages With Desktop Launchers\n\n'
+if command -v rpm >/dev/null 2>&1; then
+  find /usr/share/applications -maxdepth 1 -type f -name '*.desktop' -print 2>/dev/null |
+    while IFS= read -r file; do
+      no_display="$(awk -F= '/^NoDisplay=/{print $2; exit}' "$file" 2>/dev/null || true)"
+      hidden="$(awk -F= '/^Hidden=/{print $2; exit}' "$file" 2>/dev/null || true)"
+      [[ "$no_display" != "true" ]] || continue
+      [[ "$hidden" != "true" ]] || continue
+      rpm -qf "$file" 2>/dev/null || true
+    done | sort -u
+else
+  printf 'rpm not found\n'
+fi

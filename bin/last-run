@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# shellcheck source=bin/lib/common
+source "$SCRIPT_DIR/lib/common"
+
+PROJECT_DIR="$(resolve_project_dir)"
+LOG_DIR="$PROJECT_DIR/logs"
+
+usage() {
+  printf 'Usage: %s [update|upgrade|final]\n' "$0"
+}
+
+kind="${1:-final}"
+case "$kind" in
+  update|upgrade|final)
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+latest_file() {
+  local pattern="$1"
+  find "$LOG_DIR" -maxdepth 1 -type f -name "$pattern" -printf '%T@ %p\n' 2>/dev/null |
+    sort -nr |
+    awk 'NR == 1 { $1 = ""; sub(/^ /, ""); print }'
+}
+
+case "$kind" in
+  update)
+    file="$(latest_file 'update-*.log')"
+    ;;
+  upgrade)
+    file="$(latest_file 'upgrade-*.log')"
+    ;;
+  final)
+    file="$(latest_file 'update-*.final.md')"
+    ;;
+esac
+
+if [[ -z "${file:-}" || ! -f "$file" ]]; then
+  printf 'No %s log found in %s\n' "$kind" "$LOG_DIR" >&2
+  exit 1
+fi
+
+printf '== %s ==\n' "$file"
+tail -n 80 "$file"

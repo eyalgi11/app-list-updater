@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# shellcheck source=bin/lib/common
+source "$SCRIPT_DIR/lib/common"
+
+PROJECT_DIR="$(resolve_project_dir)"
+LOG_DIR="$PROJECT_DIR/logs"
+LOCK_FILE="$PROJECT_DIR/.upgrade.lock"
+APP_LIST_FILE="$PROJECT_DIR/apps.md"
+CONFIG_FILE="$PROJECT_DIR/config.env"
+USER_HOME="${APP_LIST_USER_HOME:-$HOME}"
+
+ENV_HAS_AUTO_UPGRADE_USER_LOCAL="${AUTO_UPGRADE_USER_LOCAL+x}"
+ENV_HAS_AUTO_UPGRADE_FLATPAK="${AUTO_UPGRADE_FLATPAK+x}"
+ENV_HAS_AUTO_UPGRADE_SYSTEM="${AUTO_UPGRADE_SYSTEM+x}"
+ENV_AUTO_UPGRADE_USER_LOCAL="${AUTO_UPGRADE_USER_LOCAL:-}"
+ENV_AUTO_UPGRADE_FLATPAK="${AUTO_UPGRADE_FLATPAK:-}"
+ENV_AUTO_UPGRADE_SYSTEM="${AUTO_UPGRADE_SYSTEM:-}"
+
+AUTO_UPGRADE_USER_LOCAL=1
+AUTO_UPGRADE_FLATPAK=1
+AUTO_UPGRADE_SYSTEM=0
+AUTO_UPGRADE_CODEX=1
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+
+if [[ -n "$ENV_HAS_AUTO_UPGRADE_USER_LOCAL" ]]; then
+  AUTO_UPGRADE_USER_LOCAL="$ENV_AUTO_UPGRADE_USER_LOCAL"
+fi
+if [[ -n "$ENV_HAS_AUTO_UPGRADE_FLATPAK" ]]; then
+  AUTO_UPGRADE_FLATPAK="$ENV_AUTO_UPGRADE_FLATPAK"
+fi
+if [[ -n "$ENV_HAS_AUTO_UPGRADE_SYSTEM" ]]; then
+  AUTO_UPGRADE_SYSTEM="$ENV_AUTO_UPGRADE_SYSTEM"
+fi
+
+mkdir -p "$LOG_DIR"
+
+timestamp="$(date +%Y%m%d-%H%M%S)"
+log_file="$LOG_DIR/upgrade-$timestamp.log"
+system_plan_file="$LOG_DIR/system-upgrade-plan-$timestamp.log"
+system_result_file="$LOG_DIR/system-upgrade-result-$timestamp.log"
+system_health_file="$LOG_DIR/system-upgrade-health-$timestamp.log"
+
+usage() {
+  printf 'Usage: %s [--dry-run]\n' "$0"
+}
+
+dry_run=0
+case "${1:-}" in
+  "")
+    ;;
+  --dry-run)
+    dry_run=1
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+log() {
+  printf '%s\n' "$*"
+}
+
+run() {
+  log "+ $*"
+  if (( ! dry_run )); then
+    "$@"
+  fi
+}
+
+run_capture() {
+  local output_file="$1"
+  shift
+
+  log "+ $* > $output_file"
+  if (( dry_run )); then
+    return 0
+  fi
+
+  {
+    printf 'Command:'
+    printf ' %q' "$@"
+    printf '\nStarted: %s\n\n' "$(date --iso-8601=seconds)"
+    "$@"
+    status="$?"
+    printf '\nFinished: %s\nExit status: %s\n' "$(date --iso-8601=seconds)" "$status"
+    return "$status"
+  } > "$output_file" 2>&1
+}
+
+field_for_app() {
+  local app="$1"
+  local column_name="$2"
+  awk -F '|' -v app="$app" -v column_name="$column_name" '
+    function trim(s) {
+      gsub(/^[ \t]+|[ \t]+$/, "", s)
+      gsub(/^`|`$/, "", s)
+      return s
+    }
+    NR == 5 {
+      for (i = 1; i <= NF; i++) {
+        if (trim($i) == column_name) {
+          target = i
+          break
+        }
+      }
+      next
+    }
+    NR > 2 && trim($2) == app {
+      if (target) {
+        print trim($target)
+      }
+      exit
+    }
+  ' "$APP_LIST_FILE"
+}
+
+upgrade_waterfox() {
+  local current latest install_path url tmp_dir archive backup_dir
+
+  current="$(field_for_app Waterfox "Current Version")"
+  latest="$(field_for_app Waterfox "Upstream Version")"
+  install_path="$(field_for_app Waterfox "Install Path")"
+
+  if [[ -z "$current" || -z "$latest" || -z "$install_path" ]]; then
+    log "Waterfox: missing table fields; skipping."
+    return 0
+  fi
+
+  if [[ "$current" == "$latest" ]]; then
+    log "Waterfox: already current at $current."
+    return 0
+  fi
+
+  if [[ "$install_path" != "$USER_HOME/.local/opt/waterfox" ]]; then
+    log "Waterfox: unsupported install path $install_path; skipping."
+    return 0
+  fi
+
+  if (( AUTO_UPGRADE_USER_LOCAL != 1 )); then
+    log "Waterfox: user-local auto-upgrades disabled."
+    return 0
+  fi
+
+  url="https://cdn.waterfox.com/waterfox/releases/$latest/Linux_x86_64/waterfox-$latest.tar.bz2"
+  tmp_dir="$PROJECT_DIR/tmp/waterfox-$latest"
+  archive="$tmp_dir/waterfox-$latest.tar.bz2"
+  backup_dir="$USER_HOME/.local/opt/waterfox.backup-$timestamp"
+
+  log "Waterfox: upgrading $current -> $latest from official CDN."
+  run mkdir -p "$tmp_dir"
+  run curl -fL "$url" -o "$archive"
+  run tar -xjf "$archive" -C "$tmp_dir"
+
+  if (( dry_run )); then
+    log "Waterfox: would replace $install_path after successful extraction."
+    return 0
+  fi
+
+  if [[ ! -x "$tmp_dir/waterfox/waterfox" ]]; then
+    log "Waterfox: extracted archive did not contain executable waterfox; aborting."
+    return 1
+  fi
+
+  mv "$install_path" "$backup_dir"
+  mv "$tmp_dir/waterfox" "$install_path"
+  mkdir -p "$USER_HOME/.local/bin"
+  ln -sfn "$install_path/waterfox" "$USER_HOME/.local/bin/waterfox"
+  "$install_path/waterfox" --version
+  log "Waterfox: upgraded successfully. Backup kept at $backup_dir."
+}
+
+upgrade_flatpak() {
+  if (( AUTO_UPGRADE_FLATPAK != 1 )); then
+    log "Flatpak: auto-upgrades disabled."
+    return 0
+  fi
+
+  if ! command -v flatpak >/dev/null 2>&1; then
+    log "Flatpak: not installed."
+    return 0
+  fi
+
+  log "Flatpak: updating installed apps."
+  run flatpak update --noninteractive -y
+}
+
+upgrade_codex_cli() {
+  local current latest install_path
+
+  current="$(field_for_app "Codex CLI" "Current Version")"
+  latest="$(field_for_app "Codex CLI" "Upstream Version")"
+  install_path="$(field_for_app "Codex CLI" "Install Path")"
+
+  if [[ -z "$current" || -z "$latest" || -z "$install_path" ]]; then
+    log "Codex CLI: missing table fields; skipping."
+    return 0
+  fi
+
+  if [[ "$install_path" != "$USER_HOME/.local/bin/codex" ]]; then
+    log "Codex CLI: unsupported install path $install_path; skipping."
+    return 0
+  fi
+
+  if (( AUTO_UPGRADE_CODEX != 1 )); then
+    log "Codex CLI: auto-upgrades disabled."
+    return 0
+  fi
+
+  if [[ "$current" == "$latest" ]]; then
+    log "Codex CLI: already current at $current."
+    return 0
+  fi
+
+  if [[ ! -x "$install_path" ]]; then
+    log "Codex CLI: executable missing at $install_path; skipping."
+    return 0
+  fi
+
+  log "Codex CLI: upgrading $current -> $latest via codex update."
+  run "$install_path" update
+}
+
+upgrade_system_packages() {
+  if (( AUTO_UPGRADE_SYSTEM != 1 )); then
+    log "System RPM packages: auto-upgrades disabled in config.env."
+    return 0
+  fi
+
+  if ! command -v zypper >/dev/null 2>&1; then
+    log "System RPM packages: zypper not found."
+    return 0
+  fi
+
+  log "System RPM packages: writing zypper dry-run plan."
+  if [[ "$(id -u)" -eq 0 ]]; then
+    run_capture "$system_plan_file" zypper --non-interactive patch --with-update --details --dry-run
+    log "System RPM packages: applying openSUSE patches/updates."
+    run_capture "$system_result_file" zypper --non-interactive patch --with-update --details
+  else
+    run_capture "$system_plan_file" sudo -n zypper --non-interactive patch --with-update --details --dry-run
+    log "System RPM packages: applying openSUSE patches/updates."
+    run_capture "$system_result_file" sudo -n zypper --non-interactive patch --with-update --details
+  fi
+
+  log "System RPM packages: writing post-upgrade health report."
+  write_system_health_report
+}
+
+write_system_health_report() {
+  log "+ write health report > $system_health_file"
+  if (( dry_run )); then
+    return 0
+  fi
+
+  {
+    printf 'Started: %s\n\n' "$(date --iso-8601=seconds)"
+
+    printf '## Kernel / Reboot Hints\n\n'
+    printf 'Running kernel: %s\n' "$(uname -r)"
+    if [[ -r /var/run/reboot-needed || -r /run/reboot-needed ]]; then
+      printf 'Reboot marker: present\n'
+    else
+      printf 'Reboot marker: not present\n'
+    fi
+
+    printf '\n## zypper ps\n\n'
+    if command -v zypper >/dev/null 2>&1; then
+      zypper ps -s 2>&1 || true
+    else
+      printf 'zypper not found\n'
+    fi
+
+    printf '\n## needs-restarting\n\n'
+    if command -v needs-restarting >/dev/null 2>&1; then
+      needs-restarting -r 2>&1 || true
+    else
+      printf 'needs-restarting not found\n'
+    fi
+
+    printf '\nFinished: %s\n' "$(date --iso-8601=seconds)"
+  } > "$system_health_file" 2>&1
+}
+
+if [[ ! -f "$APP_LIST_FILE" ]]; then
+  printf 'Missing %s\n' "$APP_LIST_FILE" >&2
+  exit 1
+fi
+
+{
+  printf 'Started: %s\n' "$(date --iso-8601=seconds)"
+  printf 'Project: %s\n' "$PROJECT_DIR"
+  printf 'Policy: user_local=%s flatpak=%s system=%s\n\n' \
+    "$AUTO_UPGRADE_USER_LOCAL" "$AUTO_UPGRADE_FLATPAK" "$AUTO_UPGRADE_SYSTEM"
+
+  flock -n 9 || {
+    printf 'Another app upgrade is already running.\n' >&2
+    exit 75
+  }
+
+  upgrade_waterfox
+  upgrade_codex_cli
+  upgrade_flatpak
+  upgrade_system_packages
+
+  printf '\nFinished: %s\n' "$(date --iso-8601=seconds)"
+} 9>"$LOCK_FILE" 2>&1 | tee "$log_file"

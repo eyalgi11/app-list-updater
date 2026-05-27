@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1 && pwd -P)"
+USER_SYSTEMD_DIR="$HOME/.config/systemd/user"
+INSTALL_DASHBOARD=1
+INSTALL_TIMER=1
+INSTALL_SYSTEM_UPGRADES=0
+INSTALL_DEPS=0
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/install [options]
+
+Options:
+  --deps                  Install openSUSE dependencies first.
+  --with-system-upgrades  Install the root system-upgrade timer with sudo.
+  --no-dashboard          Do not enable the localhost dashboard service.
+  --no-timer              Do not enable the weekly user maintenance timer.
+  --help                  Show this help.
+EOF
+}
+
+while (($#)); do
+  case "$1" in
+    --deps)
+      INSTALL_DEPS=1
+      ;;
+    --with-system-upgrades)
+      INSTALL_SYSTEM_UPGRADES=1
+      ;;
+    --no-dashboard)
+      INSTALL_DASHBOARD=0
+      ;;
+    --no-timer)
+      INSTALL_TIMER=0
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+render_unit() {
+  local src="$1"
+  local dest="$2"
+  local tmp
+  tmp="$(mktemp)"
+  sed \
+    -e "s|@PROJECT_DIR@|$PROJECT_DIR|g" \
+    -e "s|@USER_HOME@|$HOME|g" \
+    "$src" > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+copy_unit() {
+  local src="$1"
+  local dest="$2"
+  local tmp
+  tmp="$(mktemp)"
+  cp "$src" "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+if (( INSTALL_DEPS )); then
+  "$PROJECT_DIR/scripts/install-deps-opensuse"
+fi
+
+mkdir -p "$PROJECT_DIR/logs" "$PROJECT_DIR/tmp" "$USER_SYSTEMD_DIR"
+
+if [[ ! -f "$PROJECT_DIR/config.env" ]]; then
+  cp "$PROJECT_DIR/config.example.env" "$PROJECT_DIR/config.env"
+  printf 'Created %s\n' "$PROJECT_DIR/config.env"
+fi
+
+if [[ ! -f "$PROJECT_DIR/apps.md" ]]; then
+  cp "$PROJECT_DIR/apps.example.md" "$PROJECT_DIR/apps.md"
+  printf 'Created %s\n' "$PROJECT_DIR/apps.md"
+fi
+
+if ! command -v codex >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/codex" ]]; then
+  cat >&2 <<'EOF'
+Warning: Codex CLI was not found. The timer can be installed, but AI inventory runs will fail until Codex is installed.
+EOF
+fi
+
+if (( INSTALL_TIMER )); then
+  render_unit "$PROJECT_DIR/systemd/app-list-updater.service" "$USER_SYSTEMD_DIR/app-list-updater.service"
+  copy_unit "$PROJECT_DIR/systemd/app-list-updater.timer" "$USER_SYSTEMD_DIR/app-list-updater.timer"
+fi
+
+if (( INSTALL_DASHBOARD )); then
+  render_unit "$PROJECT_DIR/systemd/app-list-dashboard.service" "$USER_SYSTEMD_DIR/app-list-dashboard.service"
+fi
+
+systemctl --user daemon-reload
+
+if (( INSTALL_TIMER )); then
+  systemctl --user enable --now app-list-updater.timer
+fi
+
+if (( INSTALL_DASHBOARD )); then
+  "$PROJECT_DIR/bin/generate-dashboard" >/dev/null
+  systemctl --user enable --now app-list-dashboard.service
+fi
+
+if (( INSTALL_SYSTEM_UPGRADES )); then
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "$tmp_dir"' EXIT
+  render_unit "$PROJECT_DIR/systemd/app-list-system-upgrade.service" "$tmp_dir/app-list-system-upgrade.service"
+  copy_unit "$PROJECT_DIR/systemd/app-list-system-upgrade.timer" "$tmp_dir/app-list-system-upgrade.timer"
+  sudo cp "$tmp_dir/app-list-system-upgrade.service" /etc/systemd/system/app-list-system-upgrade.service
+  sudo cp "$tmp_dir/app-list-system-upgrade.timer" /etc/systemd/system/app-list-system-upgrade.timer
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now app-list-system-upgrade.timer
+fi
+
+cat <<EOF
+
+Installed app-list-updater from:
+  $PROJECT_DIR
+
+Dashboard:
+  http://127.0.0.1:8765/
+
+Status:
+  $PROJECT_DIR/bin/status
+EOF
