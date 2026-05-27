@@ -15,3 +15,10 @@ jobs:
           cp config.example.env config.env
       - name: Syntax and smoke tests
         run: make test
+
+  opensuse-portability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fresh openSUSE install test
+        run: scripts/test-portable-docker
