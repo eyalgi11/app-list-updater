@@ -20,6 +20,7 @@ dashboard:
 test:
 	test -f apps.md || cp apps.example.md apps.md
 	find bin scripts -type f -exec bash -n {} \;
+	./bin/audit-inventory >/dev/null
 	./bin/generate-dashboard >/dev/null
 	./bin/weekly-maintenance --dry-run >/dev/null
 

@@ -86,6 +86,7 @@ Fresh installs copy:
 - `bin/upgrade-apps` performs supported unattended upgrades after the AI check.
 - `bin/weekly-maintenance` runs discovery/check, upgrades, then discovery/check again.
 - `bin/status` summarizes timers, tracked apps, outdated state, and latest logs.
+- `bin/audit-inventory` checks that RPM package names in `apps.md` still resolve locally.
 - `bin/last-run` shows the latest update/upgrade/final log.
 - `bin/notify-maintenance` sends a desktop notification after weekly maintenance, with a log fallback.
 - `bin/generate-dashboard` writes `status.html` from `apps.md`.
@@ -119,6 +120,7 @@ Check status:
 
 ```bash
 bin/status
+bin/audit-inventory
 bin/last-run
 bin/last-run update
 bin/last-run upgrade

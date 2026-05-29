@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# shellcheck source=bin/lib/common
+source "$SCRIPT_DIR/lib/common"
+
+PROJECT_DIR="$(resolve_project_dir)"
+APP_LIST_FILE="$PROJECT_DIR/apps.md"
+
+if [[ ! -f "$APP_LIST_FILE" ]]; then
+  printf 'Missing app inventory: %s\n' "$APP_LIST_FILE" >&2
+  exit 1
+fi
+
+tmp_dir="$(mktemp -d)"
+cleanup() {
+  rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
+
+inventory_rpm="$tmp_dir/inventory-rpm"
+missing_rpm="$tmp_dir/missing-rpm"
+
+perl -ne '
+  next unless /^\|/;
+  @cells = split /\|/;
+  next unless @cells >= 11;
+  for (@cells) { s/^\s+|\s+$//g }
+  next unless lc($cells[2] // "") eq "rpm";
+  while (($cells[11] // "") =~ /installed package\s+`([^`]+)`/ig) {
+    $p = $1;
+    $p =~ s/-[0-9].*$//;
+    print "$p\n" if $p ne "";
+  }
+' "$APP_LIST_FILE" | sort -u > "$inventory_rpm"
+
+while IFS= read -r package; do
+  [[ -n "$package" ]] || continue
+  rpm -q "$package" >/dev/null 2>&1 || printf '%s\n' "$package"
+done < "$inventory_rpm" > "$missing_rpm"
+
+tracked_total="$(awk -F'|' 'NR>2 && NF > 3 {count++} END {print count+0}' "$APP_LIST_FILE")"
+rpm_rows="$(awk -F'|' 'NR>2 && tolower($3) ~ /rpm/ {count++} END {print count+0}' "$APP_LIST_FILE")"
+rpm_packages="$(wc -l < "$inventory_rpm")"
+missing_packages="$(wc -l < "$missing_rpm")"
+
+printf 'App inventory audit\n'
+printf 'Project: %s\n' "$PROJECT_DIR"
+printf 'Inventory: %s\n\n' "$APP_LIST_FILE"
+printf 'Tracked app rows: %s\n' "$tracked_total"
+printf 'RPM app rows: %s\n' "$rpm_rows"
+printf 'Extracted RPM packages: %s\n' "$rpm_packages"
+printf 'Missing RPM packages locally: %s\n' "$missing_packages"
+
+if [[ "$missing_packages" -gt 0 ]]; then
+  printf '\nMissing packages:\n'
+  sed 's/^/- /' "$missing_rpm"
+  exit 1
+fi
+
+printf '\nResult: PASS\n'
