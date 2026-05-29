@@ -129,13 +129,22 @@ if (( INSTALL_SYSTEM_UPGRADES )); then
   sudo systemctl enable --now app-list-system-upgrade.timer
 fi
 
+DASHBOARD_HOST="${APP_LIST_DASHBOARD_HOST:-127.0.0.1}"
+DASHBOARD_PORT="${APP_LIST_DASHBOARD_PORT:-8765}"
+if [[ -f "$PROJECT_DIR/config.env" ]]; then
+  # shellcheck disable=SC1090
+  source "$PROJECT_DIR/config.env"
+  DASHBOARD_HOST="${APP_LIST_DASHBOARD_HOST:-127.0.0.1}"
+  DASHBOARD_PORT="${APP_LIST_DASHBOARD_PORT:-8765}"
+fi
+
 cat <<EOF
 
 Installed app-list-updater from:
   $PROJECT_DIR
 
 Dashboard:
-  http://127.0.0.1:8765/
+  http://$DASHBOARD_HOST:$DASHBOARD_PORT/
 
 Status:
   $PROJECT_DIR/bin/status

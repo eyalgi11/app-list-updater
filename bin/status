@@ -8,6 +8,15 @@ source "$SCRIPT_DIR/lib/common"
 PROJECT_DIR="$(resolve_project_dir)"
 APP_LIST_FILE="$PROJECT_DIR/apps.md"
 LOG_DIR="$PROJECT_DIR/logs"
+CONFIG_FILE="$PROJECT_DIR/config.env"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+fi
+
+DASHBOARD_HOST="${APP_LIST_DASHBOARD_HOST:-127.0.0.1}"
+DASHBOARD_PORT="${APP_LIST_DASHBOARD_PORT:-8765}"
 
 section() {
   printf '\n== %s ==\n' "$1"
@@ -49,7 +58,7 @@ printf 'System upgrades:   '
 timer_line system app-list-system-upgrade.timer
 
 section "Dashboard"
-printf 'URL: http://127.0.0.1:8765/\n'
+printf 'URL: http://%s:%s/\n' "$DASHBOARD_HOST" "$DASHBOARD_PORT"
 if systemctl --user is-active --quiet app-list-dashboard.service 2>/dev/null; then
   printf 'Service: active\n'
 else

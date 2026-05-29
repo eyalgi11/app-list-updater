@@ -22,16 +22,27 @@ trap cleanup EXIT
 inventory_rpm="$tmp_dir/inventory-rpm"
 missing_rpm="$tmp_dir/missing-rpm"
 
-perl -ne '
-  next unless /^\|/;
-  @cells = split /\|/;
-  next unless @cells >= 11;
-  for (@cells) { s/^\s+|\s+$//g }
-  next unless lc($cells[2] // "") eq "rpm";
-  while (($cells[11] // "") =~ /installed package\s+`([^`]+)`/ig) {
-    $p = $1;
-    $p =~ s/-[0-9].*$//;
-    print "$p\n" if $p ne "";
+awk -F '|' '
+  function trim(s) {
+    gsub(/^[ \t]+|[ \t]+$/, "", s)
+    return s
+  }
+  /^\|/ {
+    install_type = tolower(trim($3))
+    notes = $12
+    if (install_type != "rpm") {
+      next
+    }
+    while (match(tolower(notes), /installed package[ \t]+`[^`]+`/)) {
+      chunk = substr(notes, RSTART, RLENGTH)
+      sub(/^[^`]*`/, "", chunk)
+      sub(/`.*/, "", chunk)
+      sub(/-[0-9].*$/, "", chunk)
+      if (chunk != "") {
+        print chunk
+      }
+      notes = substr(notes, RSTART + RLENGTH)
+    }
   }
 ' "$APP_LIST_FILE" | sort -u > "$inventory_rpm"
 
