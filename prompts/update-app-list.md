@@ -12,7 +12,7 @@ Add missing apps to `apps.md` when they are likely user-facing applications, esp
 
 - GUI apps from `.desktop` launchers
 - browsers, editors, terminals, media tools, office tools, communication tools, developer tools, and app stores
-- apps installed in `/home/eyal/.local/opt`, `/opt`, Flatpak, Snap, AppImage locations, or obvious user-local paths
+- apps installed in `$HOME/.local/opt`, `/opt`, Flatpak, Snap, AppImage locations, or obvious user-local paths
 
 Skip items that are probably internal components, helpers, MIME handlers, settings panels, package internals, duplicated launchers, or background services.
 

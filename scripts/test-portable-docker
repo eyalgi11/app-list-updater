@@ -2,7 +2,7 @@
 set -euo pipefail
 
 IMAGE="${APP_LIST_TEST_IMAGE:-opensuse/leap:latest}"
-REPO_URL="${APP_LIST_TEST_REPO_URL:-https://github.com/eyalgi11/app-list-updater.git}"
+REPO_URL="${APP_LIST_TEST_REPO_URL:-$(git config --get remote.origin.url 2>/dev/null || printf 'https://github.com/example/app-list-updater.git')}"
 
 docker run --rm "$IMAGE" bash -lc "
   set -euo pipefail
